@@ -110,9 +110,126 @@
 
 
 
+// import 'dart:math';
+// import 'package:cloud_firestore/cloud_firestore.dart';
+// import 'package:uuid/uuid.dart';
+// import '../models/user_profile.dart';
+// import '../models/match_model.dart';
+// import '../utils/constants.dart';
+// import 'firestore_service.dart';
+// import 'blocking_service.dart';
+
+// class MatchingService {
+//   final fs = FirestoreService();
+//   final _blockSvc = BlockingService();
+
+//   String _pairId(String a, String b, String dayKey, String bus) {
+//     final sorted = [a, b]..sort();
+//     return '${sorted[0]}_${sorted[1]}_$dayKey\_$bus';
+//   }
+
+//   Future<List<UserProfile>> _candidatesBySlots(UserProfile me) async {
+//     // Handle Firestore array-contains-any limit (10) by chunking slot keys.
+//     final slots = me.activeSlotKeys;
+//     if (slots.isEmpty || me.activeBusRoute == null || me.dayKey == null) return [];
+
+//     final seen = <String>{};
+//     final users = <UserProfile>[];
+
+//     for (int i = 0; i < slots.length; i += 10) {
+//       final slice = slots.sublist(i, min(i + 10, slots.length));
+//       final q = await fs.usersCol()
+//           .where('is18PlusVerified', isEqualTo: true)
+//           .where('isGeoVerified', isEqualTo: true)
+//           .where('activeBusRoute', isEqualTo: me.activeBusRoute)
+//           .where('dayKey', isEqualTo: me.dayKey)
+//           .where('activeSlotKeys', arrayContainsAny: slice)
+//           .limit(50)
+//           .get();
+
+//       for (final d in q.docs) {
+//         if (d.id == me.uid) continue;
+//         if (seen.add(d.id)) {
+//           users.add(UserProfile.fromDoc(d));
+//         }
+//       }
+//     }
+//     return users;
+//   }
+
+//   Future<void> generateMatchesForUser(UserProfile me) async {
+//     if (me.activeBusRoute == null || me.activeSlotKeys.isEmpty || me.dayKey == null) return;
+
+//     final blocked = await _blockSvc.getBlocked(me.uid);
+//     final others = await _candidatesBySlots(me);
+
+//     for (final you in others) {
+//       if (blocked.contains(you.uid)) continue;
+
+//       final overlap = me.activeSlotKeys.toSet().intersection(you.activeSlotKeys.toSet());
+//       if (overlap.isEmpty) continue;
+
+//       final id = _pairId(me.uid, you.uid, me.dayKey!, me.activeBusRoute!);
+//       final matchRef = fs.matchDoc(id);
+//       final existing = await matchRef.get();
+//       if (existing.exists) continue;
+
+//       final chatId = id;
+//       final chatRef = fs.chatDoc(chatId);
+//       final chat = await chatRef.get();
+//       if (!chat.exists) {
+//         await chatRef.set({
+//           'id': chatId,
+//           'members': [me.uid, you.uid],
+//           'busRoute': me.activeBusRoute,
+//           'dayKey': me.dayKey,
+//           'createdAt': FieldValue.serverTimestamp(),
+//           'lastMessage': null,
+//         });
+//       }
+
+//       final match = MatchModel(
+//         id: id,
+//         userIds: [me.uid, you.uid]..sort(),
+//         busRoute: me.activeBusRoute!,
+//         dayKey: me.dayKey!,
+//         chatId: chatId,
+//         createdAt: DateTime.now(),
+//       );
+//       await matchRef.set(match.toMap());
+//     }
+//   }
+
+//   Future<List<UserProfile>> potentialMatches(UserProfile me) async {
+//     if (me.activeBusRoute == null || me.activeSlotKeys.isEmpty || me.dayKey == null) return [];
+//     final candidates = await _candidatesBySlots(me);
+
+//     // Exclude already matched
+//     final matchesSnap = await fs.matchesCol()
+//         .where('userIds', arrayContains: me.uid)
+//         .where('dayKey', isEqualTo: me.dayKey)
+//         .where('busRoute', isEqualTo: me.activeBusRoute)
+//         .get();
+//     final matchedIds = matchesSnap.docs
+//         .map((d) => ((d.data() as Map<String, dynamic>)['userIds'] as List).cast<String>())
+//         .expand((e) => e)
+//         .where((id) => id != me.uid)
+//         .toSet();
+
+//     return candidates
+//         .where((u) => !matchedIds.contains(u.uid))
+//         .toList();
+//   }
+// }
+
+
+
+
+
+
+
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:uuid/uuid.dart';
 import '../models/user_profile.dart';
 import '../models/match_model.dart';
 import '../utils/constants.dart';
@@ -128,47 +245,85 @@ class MatchingService {
     return '${sorted[0]}_${sorted[1]}_$dayKey\_$bus';
   }
 
-  Future<List<UserProfile>> _candidatesBySlots(UserProfile me) async {
-    // Handle Firestore array-contains-any limit (10) by chunking slot keys.
-    final slots = me.activeSlotKeys;
-    if (slots.isEmpty || me.activeBusRoute == null || me.dayKey == null) return [];
+  // SMART CANDIDATE GATHERING WITH FALLBACKS
+  Future<List<UserProfile>> _candidatesBySlotsSmart(UserProfile me) async {
+    // Preferred path: use arrayContainsAny (chunked) — fast but may need composite index.
+    try {
+      final slots = me.activeSlotKeys;
+      if (slots.isEmpty || me.activeBusRoute == null || me.dayKey == null) return [];
+      final seen = <String>{};
+      final out = <UserProfile>[];
 
-    final seen = <String>{};
-    final users = <UserProfile>[];
-
-    for (int i = 0; i < slots.length; i += 10) {
-      final slice = slots.sublist(i, min(i + 10, slots.length));
-      final q = await fs.usersCol()
-          .where('is18PlusVerified', isEqualTo: true)
-          .where('isGeoVerified', isEqualTo: true)
-          .where('activeBusRoute', isEqualTo: me.activeBusRoute)
-          .where('dayKey', isEqualTo: me.dayKey)
-          .where('activeSlotKeys', arrayContainsAny: slice)
-          .limit(50)
-          .get();
-
-      for (final d in q.docs) {
-        if (d.id == me.uid) continue;
-        if (seen.add(d.id)) {
-          users.add(UserProfile.fromDoc(d));
+      for (int i = 0; i < slots.length; i += 10) {
+        final slice = slots.sublist(i, min(i + 10, slots.length));
+        final q = await fs.usersCol()
+            .where('is18PlusVerified', isEqualTo: true)
+            .where('isGeoVerified', isEqualTo: true)
+            .where('activeBusRoute', isEqualTo: me.activeBusRoute)
+            .where('dayKey', isEqualTo: me.dayKey)
+            .where('activeSlotKeys', arrayContainsAny: slice)
+            .limit(50)
+            .get();
+        for (final d in q.docs) {
+          if (d.id == me.uid) continue;
+          if (seen.add(d.id)) {
+            out.add(UserProfile.fromDoc(d));
+          }
         }
       }
+      return out;
+    } on FirebaseException catch (_) {
+      // Fallback #1: equality-only on (busRoute + dayKey + flags) then filter slots in-memory.
+      try {
+        final q = await fs.usersCol()
+            .where('is18PlusVerified', isEqualTo: true)
+            .where('isGeoVerified', isEqualTo: true)
+            .where('activeBusRoute', isEqualTo: me.activeBusRoute)
+            .where('dayKey', isEqualTo: me.dayKey)
+            .limit(100)
+            .get();
+        final all = q.docs
+            .where((d) => d.id != me.uid)
+            .map(UserProfile.fromDoc)
+            .toList();
+        return all;
+      } on FirebaseException catch (_) {
+        // Fallback #2: equality-only on (busRoute) then filter day + slots in-memory.
+        final q2 = await fs.usersCol()
+            .where('activeBusRoute', isEqualTo: me.activeBusRoute)
+            .limit(100)
+            .get();
+        final all2 = q2.docs
+            .where((d) => d.id != me.uid)
+            .map(UserProfile.fromDoc)
+            .toList();
+        return all2;
+      }
     }
-    return users;
   }
 
+  // Public: everyone overlapping your bus/time (including already matched). Blocks handled by caller or here.
+  Future<List<UserProfile>> overlapsForUser(UserProfile me) async {
+    if (me.activeBusRoute == null || me.activeSlotKeys.isEmpty || me.dayKey == null) return [];
+    final candidates = await _candidatesBySlotsSmart(me);
+    final mySlots = me.activeSlotKeys.toSet();
+    return candidates.where((u) {
+      // Ensure same day (in case we came from the bus-only fallback)
+      if (u.dayKey != me.dayKey) return false;
+      final overlap = mySlots.intersection(u.activeSlotKeys.toSet());
+      return overlap.isNotEmpty;
+    }).toList();
+  }
+
+  // Auto-create matches/chats for all overlaps
   Future<void> generateMatchesForUser(UserProfile me) async {
     if (me.activeBusRoute == null || me.activeSlotKeys.isEmpty || me.dayKey == null) return;
 
     final blocked = await _blockSvc.getBlocked(me.uid);
-    final others = await _candidatesBySlots(me);
+    final others = await overlapsForUser(me);
 
     for (final you in others) {
       if (blocked.contains(you.uid)) continue;
-
-      final overlap = me.activeSlotKeys.toSet().intersection(you.activeSlotKeys.toSet());
-      if (overlap.isEmpty) continue;
-
       final id = _pairId(me.uid, you.uid, me.dayKey!, me.activeBusRoute!);
       final matchRef = fs.matchDoc(id);
       final existing = await matchRef.get();
@@ -200,11 +355,11 @@ class MatchingService {
     }
   }
 
+  // Suggestions that are not already matched (kept for potential future use)
   Future<List<UserProfile>> potentialMatches(UserProfile me) async {
     if (me.activeBusRoute == null || me.activeSlotKeys.isEmpty || me.dayKey == null) return [];
-    final candidates = await _candidatesBySlots(me);
+    final candidates = await overlapsForUser(me);
 
-    // Exclude already matched
     final matchesSnap = await fs.matchesCol()
         .where('userIds', arrayContains: me.uid)
         .where('dayKey', isEqualTo: me.dayKey)
@@ -216,8 +371,6 @@ class MatchingService {
         .where((id) => id != me.uid)
         .toSet();
 
-    return candidates
-        .where((u) => !matchedIds.contains(u.uid))
-        .toList();
+    return candidates.where((u) => !matchedIds.contains(u.uid)).toList();
   }
 }
