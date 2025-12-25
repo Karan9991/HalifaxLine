@@ -551,6 +551,7 @@
 // }
 
 import 'package:flutter/material.dart';
+import 'package:halifax_line/providers/chat_provider.dart';
 import 'package:halifax_line/ui/screens/chat_screen.dart';
 import 'package:halifax_line/ui/screens/profile_detail_screen.dart';
 import 'package:halifax_line/ui/screens/profile_setup_screen.dart';
@@ -768,56 +769,108 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             const SizedBox(height: 24),
             Text('Your matches', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 10),
-            StreamBuilder(
-              stream: matchProv.matchesFor(auth.user!.uid),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const EmptyState(
-                    title: 'No matches yet',
-                    subtitle:
-                        'We’ll show matches here once you overlap on the same bus.',
-                    icon: Icons.favorite_border,
-                  );
-                }
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                      child: Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: CircularProgressIndicator(),
-                  ));
-                }
-                final matches = snapshot.data ?? [];
-                if (matches.isEmpty) {
-                  return const EmptyState(
-                    title: 'No matches yet',
-                    subtitle:
-                        'When you overlap with someone on the same bus, you’ll see them here.',
-                    icon: Icons.favorite_border,
-                  );
-                }
-                return Column(
-                  children: matches
-                      .map((m) => ListTile(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            tileColor: Colors.white.withOpacity(0.06),
-                            leading:
-                                const CircleAvatar(child: Icon(Icons.favorite)),
-                            title: Text('Chat on ${m.busRoute}'),
-                            subtitle: Text('Day ${m.dayKey}'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.pushNamed(
-                              context,
-                              ChatScreen.routeName,
-                              arguments: ChatScreenArgs(
-                                  chatId: m.chatId,
-                                  title: 'Chat on ${m.busRoute}'),
-                            ),
-                          ))
-                      .toList(),
-                );
-              },
+            // Your matches (use chats stream so hiddenFor is respected)
+const SizedBox(height: 24),
+Text('Your matches', style: Theme.of(context).textTheme.titleLarge),
+const SizedBox(height: 10),
+StreamBuilder<List<Map<String, dynamic>>>(
+  stream: context.read<ChatProvider>().myChats(auth.user!.uid),
+  builder: (context, snapshot) {
+    if (snapshot.hasError) {
+      return const EmptyState(
+        title: 'No matches yet',
+        subtitle: 'We’ll show matches here once you overlap on the same bus.',
+        icon: Icons.favorite_border,
+      );
+    }
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Center(child: Padding(
+        padding: EdgeInsets.all(24.0),
+        child: CircularProgressIndicator(),
+      ));
+    }
+    final chats = snapshot.data ?? [];
+    if (chats.isEmpty) {
+      return const EmptyState(
+        title: 'No matches yet',
+        subtitle: 'When you overlap with someone on the same bus, you’ll see them here.',
+        icon: Icons.favorite_border,
+      );
+    }
+    return Column(
+      children: chats.map((c) {
+        final last = c['lastMessage'] as Map<String, dynamic>?;
+        final subtitle = last != null ? (last['text'] as String? ?? '') : 'Say hi!';
+        return ListTile(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          tileColor: Colors.white.withOpacity(0.06),
+          leading: const CircleAvatar(child: Icon(Icons.favorite)),
+          title: Text('Chat on ${c['busRoute'] ?? ''}'),
+          subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.pushNamed(
+            context,
+            ChatScreen.routeName,
+            arguments: ChatScreenArgs(
+              chatId: c['id'],
+              title: 'Chat on ${c['busRoute'] ?? ''}',
             ),
+          ),
+        );
+      }).toList(),
+    );
+  },
+),
+            // StreamBuilder(
+            //   stream: matchProv.matchesFor(auth.user!.uid),
+            //   builder: (context, snapshot) {
+            //     if (snapshot.hasError) {
+            //       return const EmptyState(
+            //         title: 'No matches yet',
+            //         subtitle:
+            //             'We’ll show matches here once you overlap on the same bus.',
+            //         icon: Icons.favorite_border,
+            //       );
+            //     }
+            //     if (snapshot.connectionState == ConnectionState.waiting) {
+            //       return const Center(
+            //           child: Padding(
+            //         padding: EdgeInsets.all(24.0),
+            //         child: CircularProgressIndicator(),
+            //       ));
+            //     }
+            //     final matches = snapshot.data ?? [];
+            //     if (matches.isEmpty) {
+            //       return const EmptyState(
+            //         title: 'No matches yet',
+            //         subtitle:
+            //             'When you overlap with someone on the same bus, you’ll see them here.',
+            //         icon: Icons.favorite_border,
+            //       );
+            //     }
+            //     return Column(
+            //       children: matches
+            //           .map((m) => ListTile(
+            //                 shape: RoundedRectangleBorder(
+            //                     borderRadius: BorderRadius.circular(16)),
+            //                 tileColor: Colors.white.withOpacity(0.06),
+            //                 leading:
+            //                     const CircleAvatar(child: Icon(Icons.favorite)),
+            //                 title: Text('Chat on ${m.busRoute}'),
+            //                 subtitle: Text('Day ${m.dayKey}'),
+            //                 trailing: const Icon(Icons.chevron_right),
+            //                 onTap: () => Navigator.pushNamed(
+            //                   context,
+            //                   ChatScreen.routeName,
+            //                   arguments: ChatScreenArgs(
+            //                       chatId: m.chatId,
+            //                       title: 'Chat on ${m.busRoute}'),
+            //                 ),
+            //               ))
+            //           .toList(),
+            //     );
+            //   },
+            // ),
           ],
         ),
       ),

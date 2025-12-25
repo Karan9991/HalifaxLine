@@ -190,33 +190,63 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // Stream my chats, excluding those I've hidden; sort by updatedAt/createdAt desc (no composite index needed).
-  Stream<List<Map<String, dynamic>>> myChats(String uid) {
-    DateTime _ts(dynamic v) {
-      if (v is Timestamp) return v.toDate();
-      if (v is DateTime) return v;
-      return DateTime.fromMillisecondsSinceEpoch(0);
-    }
-
-    return fs.chatsCol()
-        .where('members', arrayContains: uid)
-        .snapshots()
-        .map((snap) {
-          final items = snap.docs.map((d) {
-            final data = (d.data() as Map<String, dynamic>);
-            data['id'] = data['id'] ?? d.id;
-            return data;
-          }).where((data) {
-            final hidden = (data['hiddenFor'] as List?)?.cast<String>() ?? const <String>[];
-            return !hidden.contains(uid);
-          }).toList();
-
-          // Prefer updatedAt, fallback to createdAt
-          items.sort((a, b) {
-            final ad = _ts(a['updatedAt'] ?? a['createdAt']);
-            final bd = _ts(b['updatedAt'] ?? b['createdAt']);
-            return bd.compareTo(ad);
-          });
-          return items;
-        });
+  
+Stream<List<Map<String, dynamic>>> myChats(String uid) {
+  DateTime _ts(dynamic v) {
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
+
+  return fs.chatsCol()
+      .where('members', arrayContains: uid)
+      .snapshots()
+      .map((snap) {
+        final items = snap.docs.map((d) {
+          final data = (d.data() as Map<String, dynamic>);
+          data['id'] = data['id'] ?? d.id;
+          return data;
+        }).where((data) {
+          final hidden = (data['hiddenFor'] as List?)?.cast<String>() ?? const <String>[];
+          return !hidden.contains(uid);
+        }).toList();
+
+        items.sort((a, b) {
+          final ad = _ts(a['updatedAt'] ?? a['createdAt']);
+          final bd = _ts(b['updatedAt'] ?? b['createdAt']);
+          return bd.compareTo(ad);
+        });
+        return items;
+      });
+}
+
+  // Stream<List<Map<String, dynamic>>> myChats(String uid) {
+  //   DateTime _ts(dynamic v) {
+  //     if (v is Timestamp) return v.toDate();
+  //     if (v is DateTime) return v;
+  //     return DateTime.fromMillisecondsSinceEpoch(0);
+  //   }
+
+  //   return fs.chatsCol()
+  //       .where('members', arrayContains: uid)
+  //       .snapshots()
+  //       .map((snap) {
+  //         final items = snap.docs.map((d) {
+  //           final data = (d.data() as Map<String, dynamic>);
+  //           data['id'] = data['id'] ?? d.id;
+  //           return data;
+  //         }).where((data) {
+  //           final hidden = (data['hiddenFor'] as List?)?.cast<String>() ?? const <String>[];
+  //           return !hidden.contains(uid);
+  //         }).toList();
+
+  //         // Prefer updatedAt, fallback to createdAt
+  //         items.sort((a, b) {
+  //           final ad = _ts(a['updatedAt'] ?? a['createdAt']);
+  //           final bd = _ts(b['updatedAt'] ?? b['createdAt']);
+  //           return bd.compareTo(ad);
+  //         });
+  //         return items;
+  //       });
+  // }
 }
